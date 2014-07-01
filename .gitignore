@@ -34,3 +34,12 @@ Icon
 # Files that might appear on external disk
 .Spotlight-V100
 .Trashes
+
+*.eep
+Debug/cyclops.elf
+Debug/cyclops.hex
+Debug/cyclops.lss
+Debug/cyclops.map
+Debug/cyclops.srec
+Debug/makedep.mk
+Debug/Makefile
