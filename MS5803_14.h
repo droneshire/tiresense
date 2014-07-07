@@ -5,23 +5,8 @@
  *	
  *	This library only works with the MS5803-14BA model sensor. It DOES NOT
  *	work with the other pressure-range models such as the MS5803-30BA or
- *	MS5803-01BA. Those models will return incorrect pressure and temperature 
- *	readings if used with this library. See http://github.com/millerlp for
- *	libraries for the other models. 
- *	 
- * 	No warranty is given or implied. You are responsible for verifying that 
- *	the outputs are correct for your sensor. There are likely bugs in
- *	this code that could result in incorrect pressure readings, particularly
- *	due to variable overflows within some pressure ranges. 
- * 	DO NOT use this code in a situation that could result in harm to you or 
- * 	others because of incorrect pressure readings.
- * 	 
- * 	
- * 	Licensed under the GPL v3 license. 
- * 	Please see accompanying LICENSE.md file for details on reuse and 
- * 	redistribution.
- * 	
- * 	Copyright Luke Miller, April 1 2014
+ *	MS5803-01BA. 
+
  */
 
 
@@ -37,12 +22,12 @@ public:
 	// values of 256, 512, 1024, 2048, 4096
     MS_5803(uint16_t Resolution = 512);
     // Initialize the sensor 
-    boolean initializeMS_5803(boolean Verbose = true);
+    boolean initializeMS_5803();
     // Reset the sensor
     void resetSensor();
     // Read the sensor
     void readSensor();
-    //*********************************************************************
+	//*********************************************************************
     // Additional methods to extract temperature, pressure (mbar), and the 
     // D1,D2 values after readSensor() has been called
     

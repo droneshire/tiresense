@@ -22,7 +22,7 @@
 	//static const uint8_t SCK  = 13;
 	
 	/************************************************************************/
-	//ACCELEROMETER CONSTANTS
+	//ACCELEROMETER CONSTANTS: these all need to be translated to attributes
 	/************************************************************************/
 	#define ACC1_ADDR				0x1D	// I2C address for first accelerometer
 	#define ACC2_ADDR				0x1C	// I2C address for second accelerometer
@@ -80,7 +80,7 @@
 	void disableInt(byte pcie);
 	void enableInt(byte pcie);
 	void SetFactoryMode();
-	void sleepHandler();
+	void sleepHandler(bool still);
 	void setup();
 	void loop();
 	
@@ -88,17 +88,18 @@
 	/************************************************************************/
 	//GLOBAL VARIABLES
 	/************************************************************************/
-	bool got_slp_wake;
-	bool got_data_acc;
-	bool got_int_ble;
+	volatile bool got_slp_wake;
+	volatile bool got_data_acc;
+	volatile bool factory_sleep;
+	volatile bool got_int_ble;
 	bool accel_on;
-	bool both_acc = false;
-	bool factory_sleep;
-	bool _sleep_inactive = false;
+	bool both_acc;
+	bool _sleep_inactive;
+	bool _sleep_active;
 	
+	volatile byte intSource = 0x00;
 	byte header = 0x50;
 	byte endbyte = 0x5F;
-	byte intSource = 0x00;
 	
 	AccOdr f_odr = (AccOdr)DATARATE;
 	uint16_t intCount;
@@ -127,6 +128,9 @@
 		got_slp_wake = false;
 		got_data_acc = false;
 		got_int_ble = false;
+		both_acc = false;
+		_sleep_inactive = false;
+		_sleep_active = false;
 		
 		intCount = 0;
 		
@@ -144,7 +148,7 @@
 #ifdef RDV_DEBUG
 			Serial.print("Could not connect to MMA8452Q");
 #endif
-		accel_on = false;
+			accel_on = false;
 		}
 		
 #ifdef RDV_DEBUG	
@@ -169,6 +173,8 @@
 #endif
 		SetFactoryMode();
 	}
+
+
 	
 	void loop()
 	{
@@ -262,14 +268,22 @@
 #endif
 			clearAccInts();			//clear interrupts at the end of this handler 		
 		}
-		
 
 		if(_sleep_inactive)
 		{
 #ifdef RDV_DEBUG
 			Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
+			delay(10);
 #endif
-			sleepHandler();
+			sleepHandler(true);
+		}
+		else if(_sleep_active)
+		{
+#ifdef RDV_DEBUG
+			Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
+			delay(10);
+#endif
+			sleepHandler(false);			
 		}
 	}// void loop()
 	
@@ -301,7 +315,7 @@
 	}
 
 	
-	void sleepHandler()
+	void sleepHandler(bool still)
 	{
 		got_slp_wake = false;
 		got_data_acc = false;
@@ -315,7 +329,7 @@
 		enableInt(PCIE0);
 		enableInt(PCIE1);
 		disableInt(PCIE2);
-		//disableInt(PCIE0);
+		still ? disableInt(PCIE2) : enableInt(PCIE2);	//we want to sleep in between data reads AND when no motion occurs
 		clearAccInts();
 		sei();
 		sleep_cpu();

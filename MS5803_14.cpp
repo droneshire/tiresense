@@ -1,27 +1,4 @@
 /*	MS5803_14
- * 	An Arduino library for the Measurement Specialties MS5803 family
- * 	of pressure sensors. This library uses I2C to communicate with the
- * 	MS5803 using the Wire library from Arduino.
- *	
- *	This library only works with the MS5803-14BA model sensor. It DOES NOT
- *	work with the other pressure-range models such as the MS5803-30BA or
- *	MS5803-01BA. Those models will return incorrect pressure and temperature 
- *	readings if used with this library. See http://github.com/millerlp for
- *	libraries for the other models. 
- *	 
- * 	No warranty is given or implied. You are responsible for verifying that 
- *	the outputs are correct for your sensor. There are likely bugs in
- *	this code that could result in incorrect pressure readings, particularly
- *	due to variable overflows within some pressure ranges. 
- * 	DO NOT use this code in a situation that could result in harm to you or 
- * 	others because of incorrect pressure readings.
- * 	 
- * 	
- * 	Licensed under the GPL v3 license. 
- * 	Please see accompanying LICENSE.md file for details on reuse and 
- * 	redistribution.
- * 	
- * 	Copyright Luke Miller, April 1 2014
  */
 
 #include "MS5803_14.h"
@@ -65,6 +42,8 @@ static byte HighByte;
 static byte MidByte;
 static byte LowByte;
 
+extern void sleepHandler(bool still);
+
 // Some constants used in calculations below
 const uint64_t POW_2_33 = 8589934592ULL; // 2^33 = 8589934592
 const uint64_t POW_2_37 = 137438953472ULL; // 2^37 = 137438953472
@@ -78,24 +57,22 @@ MS_5803::MS_5803(uint16_t Resolution) {
 }
 
 //-------------------------------------------------
-boolean MS_5803::initializeMS_5803(boolean Verbose) {
+boolean MS_5803::initializeMS_5803() {
     Wire.begin();
     // Reset the sensor during startup
     resetSensor(); 
-    
-    if (Verbose) {
-    	// Display the oversampling resolution or an error message
-    	if (_Resolution == 256 | _Resolution == 512 | _Resolution == 1024 | _Resolution == 2048 | _Resolution == 4096){
-        	Serial.print("Oversampling setting: ");
-        	Serial.println(_Resolution);    		
-    	} else {
-			Serial.println("*******************************************");
-			Serial.println("Error: specify a valid oversampling value");
-			Serial.println("Choices are 256, 512, 1024, 2048, or 4096");
-			Serial.println("*******************************************");
-    	}
-
+#ifdef RDV_DEBUG  
+    // Display the oversampling resolution or an error message
+    if (_Resolution == 256 | _Resolution == 512 | _Resolution == 1024 | _Resolution == 2048 | _Resolution == 4096){
+       	Serial.print("Oversampling setting: ");
+       	Serial.println(_Resolution);    		
+    } else {
+		Serial.println("*******************************************");
+		Serial.println("Error: specify a valid oversampling value");
+		Serial.println("Choices are 256, 512, 1024, 2048, or 4096");
+		Serial.println("*******************************************");
     }
+#endif
 	// Read sensor coefficients
     for (int i = 0; i < 8; i++ ){
     	// The PROM starts at address 0xA0
@@ -106,28 +83,27 @@ boolean MS_5803::initializeMS_5803(boolean Verbose) {
     	while(Wire.available()) {
     		HighByte = Wire.read();
     		LowByte = Wire.read();
-    	}
-    	sensorCoeffs[i] = (((unsigned int)HighByte << 8) + LowByte);
-    	if (Verbose){
-			// Print out coefficients 
-			Serial.print("C");
-			Serial.print(i);
-			Serial.print(" = ");
-			Serial.println(sensorCoeffs[i]);
-			delay(10);
-    	}
+		}
+		sensorCoeffs[i] = (((unsigned int)HighByte << 8) + LowByte);
+#ifdef RDV_DEBUG
+		// Print out coefficients 
+		Serial.print("C");
+		Serial.print(i);
+		Serial.print(" = ");
+		Serial.println(sensorCoeffs[i]);
+		delay(10);
+#endif
     }
     // The last 4 bits of the 7th coefficient form a CRC error checking code.
     unsigned char p_crc = sensorCoeffs[7];
     // Use a function to calculate the CRC value
     unsigned char n_crc = MS_5803_CRC(sensorCoeffs); 
-    
-    if (Verbose) {
+#ifdef RDV_DEBUG
 		Serial.print("p_crc: ");
 		Serial.println(p_crc);
 		Serial.print("n_crc: ");
 		Serial.println(n_crc);
-    }
+#endif
     // If the CRC value doesn't match the sensor's CRC value, then the 
     // connection can't be trusted. Check your wiring. 
     if (p_crc != n_crc) {
@@ -166,16 +142,14 @@ void MS_5803::readSensor() {
     // Use integer division to calculate TEMP. It is necessary to cast
     // one of the operands as a signed 64-bit integer (int64_t) so there's no 
     // rollover issues in the numerator.
-//    TEMP = 2000 + ((int64_t)dT * sensorCoeffs[6]) / pow(2,23);
+	//    TEMP = 2000 + ((int64_t)dT * sensorCoeffs[6]) / pow(2,23);
     TEMP = 2000 + ((int64_t)dT * sensorCoeffs[6]) / 8388608LL;
-//    TEMP = 2000 + ((int64_t)dT * sensorCoeffs[6]) / (int64_t)1<<23;
+	//    TEMP = 2000 + ((int64_t)dT * sensorCoeffs[6]) / (int64_t)1<<23;
     // Recast TEMP as a signed 32-bit integer
     TEMP = (int32_t)TEMP;
 
-    
     // All operations from here down are done as integer math until we make
     // the final calculation of pressure in mbar. 
-    
     
     // Do 2nd order temperature compensation (see pg 9 of MS5803 data sheet)
     // I have tried to insert the fixed values wherever possible 
@@ -212,7 +186,7 @@ void MS_5803::readSensor() {
   
     // Adjust TEMP, Offset, Sensitivity values based on the 2nd order 
     // temperature correction above.
-    TEMP = TEMP - T2; // both should be int32_t
+    TEMP = TEMP - T2; // both should be int32_t	//<---send this value for TEMP************
     Offset = Offset - OFF2; // both should be int64_t
     Sensitivity = Sensitivity - Sens2; // both should be int64_t
     
@@ -221,21 +195,21 @@ void MS_5803::readSensor() {
     // float (mbar). 
 	// For 14 bar sensor
 	mbarInt = ((D1 * Sensitivity) / 2097152 - Offset) / 32768;
-	mbar = (float)mbarInt / 10;
+	mbar = (float)mbarInt / 10;		//<---send this value for PRESS*******************
     // Calculate the human-readable temperature in Celsius
     tempC  = (float)TEMP / 100; 
 	
 	
     // Start other temperature conversions by converting mbar to psi absolute
-//    psiAbs = mbar * 0.0145038;
-//    // Convert psi absolute to inches of mercury
-//    inHgPress = psiAbs * 2.03625;
-//    // Convert psi absolute to gauge pressure
-//    psiGauge = psiAbs - 14.7;
-//    // Convert mbar to mm Hg
-//    mmHgPress = mbar * 0.7500617;
-//    // Convert temperature to Fahrenheit
-//    tempF = (tempC * 1.8) + 32;
+	//    psiAbs = mbar * 0.0145038;
+	//    // Convert psi absolute to inches of mercury
+	//    inHgPress = psiAbs * 2.03625;
+	//    // Convert psi absolute to gauge pressure
+	//    psiGauge = psiAbs - 14.7;
+	//    // Convert mbar to mm Hg
+	//    mmHgPress = mbar * 0.7500617;
+	//    // Convert temperature to Fahrenheit
+	//    tempF = (tempC * 1.8) + 32;
     
 }
 
@@ -308,6 +282,7 @@ unsigned long MS_5803::MS_5803_ADC(char commandADC) {
             delay(10);
             break;
     }
+//	sleepHandler(false);
     // Now send the read command to the MS5803 
     Wire.beginTransmission(MS5803_I2C_ADDRESS);
     Wire.write((byte)CMD_ADC_READ);
