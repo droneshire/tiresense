@@ -88,10 +88,10 @@
 	/************************************************************************/
 	//GLOBAL VARIABLES
 	/************************************************************************/
-	volatile bool got_slp_wake;
-	volatile bool got_data_acc;
-	volatile bool factory_sleep;
-	volatile bool got_int_ble;
+	bool volatile got_slp_wake;
+	bool volatile got_data_acc;
+	bool volatile factory_sleep;
+	bool volatile got_int_ble;
 	bool accel_on;
 	bool both_acc;
 	bool _sleep_inactive;
