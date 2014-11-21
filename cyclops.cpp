@@ -74,6 +74,7 @@
 	/************************************************************************/
 	//PROTOTYPES
 	/************************************************************************/
+	bool sendPacket(BleLongPacket * blePacket);
 	void readPressureTemp();
 	long readVcc();
 	void clearAccInts();
@@ -88,18 +89,16 @@
 	/************************************************************************/
 	//GLOBAL VARIABLES
 	/************************************************************************/
-	bool volatile got_slp_wake;
-	bool volatile got_data_acc;
-	bool volatile factory_sleep;
-	bool volatile got_int_ble;
+	volatile bool got_slp_wake;
+	volatile bool got_data_acc;
+	volatile bool factory_sleep;
+	volatile bool got_int_ble;
 	bool accel_on;
 	bool both_acc;
 	bool _sleep_inactive;
 	bool _sleep_active;
 	
-	volatile byte intSource = 0x00;
-	byte header = 0x50;
-	byte endbyte = 0x5F;
+	volatile byte intSource;
 	
 	AccOdr f_odr = (AccOdr)DATARATE;
 	uint16_t intCount;
@@ -183,8 +182,6 @@
 		{
 			got_int_ble = false;
 			
-			BlePkt.startpkt = header;
-			BlePkt.endpkt = endbyte;
 			
 #ifdef RDV_DEBUG
 			Serial.println("Setting up accelerometers...");
@@ -212,6 +209,7 @@
 			{
 				readPressureTemp();
 				intCount = 0;
+				sendPacket(&BlePkt);
 			}
 			
 			// Now we'll calculate the acceleration value into actual g's
@@ -237,7 +235,8 @@
 		if(got_slp_wake) 
 		{	
 			got_slp_wake = false;
-			 
+			intSource= acc1.readRegister(INT_SOURCE) & 0xFE; //we don't care about the data interrupt here
+			acc1.readRegister(FF_MT_SRC);	//CLEAR MOTION INTERRUPT
 #ifdef RDV_DEBUG
 			Serial.print("INT 1: 0x");
 			Serial.println(intSource, HEX);
@@ -268,23 +267,12 @@
 #endif
 			clearAccInts();			//clear interrupts at the end of this handler 		
 		}
-
-		if(_sleep_inactive)
-		{
+	
 #ifdef RDV_DEBUG
-			Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
-			delay(10);
+		Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
+		delay(10);
 #endif
-			sleepHandler(true);
-		}
-		else if(_sleep_active)
-		{
-#ifdef RDV_DEBUG
-			Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
-			delay(10);
-#endif
-			sleepHandler(false);			
-		}
+		sleepHandler(_sleep_inactive);
 	}// void loop()
 	
 	
@@ -328,8 +316,7 @@
 		sleep_bod_disable();
 		enableInt(PCIE0);
 		enableInt(PCIE1);
-		disableInt(PCIE2);
-		still ? disableInt(PCIE2) : enableInt(PCIE2);	//we want to sleep in between data reads AND when no motion occurs
+		still ? disableInt(PCIE2) : enableInt(PCIE2);	//if we want to sleep in between data reads AND when no motion occurs
 		clearAccInts();
 		sei();
 		sleep_cpu();
@@ -343,6 +330,12 @@
 		acc1.readRegister(FF_MT_SRC);
 		acc1.readAccelData(accelCount);
 	}
+	
+	bool sendPacket(BleLongPacket * blePacket)
+	{
+		//TODO: add to characteristic, send to BLE
+	}
+	
 	void readPressureTemp()
 	{
 		cli();
@@ -436,7 +429,7 @@
 		
 		delay(2); // Wait for Vref to settle
 		ADCSRA |= _BV(ADSC); // Start conversion
-		while (ADCSRA & _BV(ADSC)); // measuring
+		while (ADCSRA & _BV(ADSC)); 
 		
 		uint8_t low  = ADCL; // must read ADCL first - it then locks ADCH
 		uint8_t high = ADCH; // unlocks both
@@ -455,17 +448,19 @@
 	ISR(PCINT0_vect)
 	{
 		cli();
-		if(digitalRead(INT_BLE) && factory_sleep)
+		if(digitalRead(INT_BLE))
 		{
-			factory_sleep = false;
-			got_int_ble = true;
-		}
-		else if(digitalRead(INT_BLE) && !factory_sleep)
-		{
+			if(factory_sleep)
+			{
+				factory_sleep = false;
+				got_int_ble = true;
+			}
+			else 
+			{
 #ifdef RDV_DEBUG
-			Serial.println("BLE pushed, no factory");
+				Serial.println("BLE pushed, no factory");
 #endif
-		}
+			}
 		sei();
 	}
 	
@@ -474,8 +469,6 @@
 		cli();
 		if(digitalRead(INT1_ACC))
 		{
-			intSource= acc1.readRegister(INT_SOURCE) & 0xFE; //we don't care about the data interrupt here
-			acc1.readRegister(FF_MT_SRC);	//CLEAR MOTION INTERRUPT
 			got_slp_wake = true;
 		}
 		sei();
