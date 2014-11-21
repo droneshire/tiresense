@@ -1,3 +1,13 @@
+//#START_MODULE_HEADER////////////////////////////////////////////////////////
+//#
+//# Filename:		cyclops.cpp
+//#
+//# Description:	This program is the main program for cycleAT tire sensor
+//#
+//# Authors:     	Ross Yeager
+//#
+//#END_MODULE_HEADER//////////////////////////////////////////////////////////
+
 	#include "Arduino.h"
 	#include "MMA8452REGS.h"
 	#include "MMA8452.h"
@@ -52,36 +62,36 @@
 		} AccOdr;
 
 #ifdef LONGPACKET
-	typedef struct BleLongPacket{
-		byte startpkt;
+	typedef struct BleLongPacket_t{
+		uint8_t startpkt;
 		float pressure;
 		float temperature;
 		float acc1_data[NUM_ACC_DATA];
 		float acc2_data[NUM_ACC_DATA];
-		byte endpkt;
+		uint8_t endpkt;
 	}BleLongPacket;
 #else
-	typedef struct BleRawPacket{
-		byte startpkt;
+	typedef struct BleRawPacket_t{
+		uint8_t startpkt;
 		int32_t pressure;
 		int32_t temperature;
 		int acc1_data[NUM_ACC_DATA];
 		int acc2_data[NUM_ACC_DATA];
-		byte endpkt;
+		uint8_t endpkt;
 	}BleRawPacket;
 #endif
 
 	/************************************************************************/
 	//PROTOTYPES
 	/************************************************************************/
-	bool sendPacket(BleLongPacket * blePacket);
-	void readPressureTemp();
-	long readVcc();
-	void clearAccInts();
-	void disableInt(byte pcie);
-	void enableInt(byte pcie);
-	void SetFactoryMode();
-	void sleepHandler(bool still);
+	bool send_packet(BleLongPacket * blePacket);
+	void read_press_temp();
+	long read_vcc();
+	void clear_acc_ints();
+	void disable_int(uint8_t pcie);
+	void enable_int(uint8_t pcie);
+	void set_factory_mode();
+	void sleep_handler(bool still);
 	void setup();
 	void loop();
 	
@@ -98,18 +108,30 @@
 	bool _sleep_inactive;
 	bool _sleep_active;
 	
-	volatile byte intSource;
+	volatile uint8_t intSource;
 	
 	AccOdr f_odr = (AccOdr)DATARATE;
 	uint16_t intCount;
-	int accelCount[3];  				// Stores the 12-bit signed value
-	float accelG[3];  					// Stores the real accel value in g's
+	int16_t accelCount[3];  				// Stores the 12-bit signed value
+	float accelG[3];  						// Stores the real accel value in g's
 	MMA8452 acc1 = MMA8452(ACC1_ADDR);
 	MMA8452 acc2 = MMA8452(ACC2_ADDR);
 	BleLongPacket BlePkt;
-	
 	/************************************************************************/
 
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Initialization function.  Configures IO pins, enables interrupts.
+//#					Heartbeat checks the accelerometers and determines if there are 1
+//#					or 2 active (in case we unstuff the second one in future) and sets.
+//#					the device into factory mode.  In debug, it can print out initialization stats.
+//#
+//# Parameters:		None
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////
 	void setup()
 	{
 		pinMode(LED, OUTPUT);
@@ -133,27 +155,25 @@
 		
 		intCount = 0;
 		
-		if (acc1.readRegister(WHO_AM_I) == 0x2A) 						// WHO_AM_I should always be 0x2A
-		{
-			accel_on = true;
-			if(acc2.readRegister(WHO_AM_I) == 0x2A);
-				both_acc = false;
+		// WHO_AM_I should always be 0x2A
+		accel_on = acc1.readRegister(WHO_AM_I) == 0x2A;
+		both_acc = acc2.readRegister(WHO_AM_I) == 0x2A;
+		
 #ifdef RDV_DEBUG
+		if(accel_on)
+		{
 			Serial.println("MMA8452Q is on-line...");
-#endif			
 		}
 		else
 		{
-#ifdef RDV_DEBUG
 			Serial.print("Could not connect to MMA8452Q");
-#endif
-			accel_on = false;
 		}
+#endif
 		
 #ifdef RDV_DEBUG	
 		Serial.println("WELCOME TO CYCLEAT...");
 		Serial.println("+++++++++++++++++++++++++++++");
-		long tempVcc = readVcc();
+		long tempVcc = read_vcc();
 		Serial.print("Power Level At: ");
 		Serial.print(tempVcc / 1000);
 		Serial.print(".");
@@ -170,11 +190,19 @@
 		Serial.println("Setting into factory mode...");
 		delay(2500);
 #endif
-		SetFactoryMode();
+		set_factory_mode();
 	}
 
 
-	
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Main loop
+//#
+//# Parameters:		None
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////	
 	void loop()
 	{
 		//BLE SENT INTERRUPT
@@ -186,7 +214,7 @@
 #ifdef RDV_DEBUG
 			Serial.println("Setting up accelerometers...");
 #endif
-			enableInt(ALL_INTS);
+			enable_int(ALL_INTS);
 
 			acc1.initMMA8452(SCALE, DATARATE, SLEEPRATE, ASLP_COUNT, MOTION_THRESHOLD, MOTION_DEBOUNCE_COUNT);
 			if(both_acc) 
@@ -207,17 +235,17 @@
 			
 			if(++intCount >= f_odr)
 			{
-				readPressureTemp();
+				read_press_temp();
 				intCount = 0;
-				sendPacket(&BlePkt);
+				send_packet(&BlePkt);
 			}
 			
 			// Now we'll calculate the acceleration value into actual g's
-			for (int i=0; i<3; i++)
+			for (uint16_t i=0; i<3; i++)
 			accelG[i] = (float) accelCount[i]/((1<<12)/(2*SCALE));  // get actual g value, this depends on scale being set
 			// Print out values
 
-			for (int i=0; i<NUM_AXIS; i++)
+			for (uint16_t i=0; i<NUM_AXIS; i++)
 			{
 				BlePkt.acc1_data[intCount*NUM_AXIS + i] = accelG[i];
 				BlePkt.acc2_data[intCount*NUM_AXIS + i] = 0;
@@ -246,7 +274,7 @@
 				case 0x84:		//MOTION AND SLEEP/WAKE INTERRUPT (if even possible?)
 				case 0x80:		//SLEEP/WAKE INTERRUPT
 				{
-					byte sysmod = acc1.readRegister(SYSMOD);
+					uint8_t sysmod = acc1.readRegister(SYSMOD);
 					//acc1.readRegister(FF_MT_SRC);	//CLEAR MOTION INTERRUPT
 #ifdef RDV_DEBUG
 					Serial.print("SYSMOD: 0x");
@@ -265,30 +293,43 @@
 #ifdef RDV_DEBUG
 			Serial.println("Clearing ints...");
 #endif
-			clearAccInts();			//clear interrupts at the end of this handler 		
+			clear_acc_ints();			//clear interrupts at the end of this handler 		
 		}
 	
 #ifdef RDV_DEBUG
 		Serial.flush();	 //clear the buffer before sleeping, otherwise can lock up the pipe
 		delay(10);
 #endif
-		sleepHandler(_sleep_inactive);
+		sleep_handler(_sleep_inactive);
 	}// void loop()
 	
 	
 //********************************************************************
 //	Functions and ISRs
 //********************************************************************
-	void SetFactoryMode()
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	
+//#					Puts the sensor into factory mode.  This mode
+//#		 			is essentially an ultra deep sleep mode that is only brought out
+//#					of sleep by one specific interrupt generated by the BLE unit.  
+//#
+//# Parameters:		None
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////
+	void set_factory_mode()
 	{
 		got_slp_wake = false;
 		got_data_acc = false;
 		got_int_ble = false;
 		factory_sleep = true;
 		
-		enableInt(PCIE0);
-		disableInt(PCIE1);
-		disableInt(PCIE2);
+		enable_int(PCIE0);
+		disable_int(PCIE1);
+		disable_int(PCIE2);
 		acc1.MMA8452Standby();
 		acc2.MMA8452Standby();
 			
@@ -299,11 +340,24 @@
 		sei();
 		sleep_cpu();
 		sleep_disable();
-		clearAccInts();
+		clear_acc_ints();
 	}
 
-	
-	void sleepHandler(bool still)
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Puts the unit into sleep while enabling proper interrupts to 
+//#					exit sleep mode.  In normal mode, we want to sleep in between
+//#					data ready aquisitions to maximize power.  When no motion is present,
+//#					we only want to be woken up by BLE or movement again, not data
+//#					ready.
+//#
+//# Parameters:		still --> 	true = disable acc data interrupts
+//#								false = enable acc data interrupts
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////
+	void sleep_handler(bool still)
 	{
 		got_slp_wake = false;
 		got_data_acc = false;
@@ -314,29 +368,44 @@
 		sleep_enable();
 		cli();
 		sleep_bod_disable();
-		enableInt(PCIE0);
-		enableInt(PCIE1);
-		still ? disableInt(PCIE2) : enableInt(PCIE2);	//if we want to sleep in between data reads AND when no motion occurs
-		clearAccInts();
+		enable_int(PCIE0);
+		enable_int(PCIE1);
+		still ? disable_int(PCIE2) : enable_int(PCIE2);	//if we want to sleep in between data reads AND when no motion occurs
+		clear_acc_ints();
 		sei();
 		sleep_cpu();
 		sleep_disable();
-		enableInt(PCIE2);
+		enable_int(PCIE2);
 	}
 	
-	void clearAccInts()
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Reads the specified registers to clear all interrupts for the
+//#					accelerometer.  This must be done after processing or the device
+//#					will get stuck in sleep mode because the interrupt cannot re-assert
+//#
+//#					INT_SOURCE | FF_MT_SRC | ACCELEROMETER DATA
+//#
+//# Parameters:		None
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////
+	void clear_acc_ints()
 	{
 		acc1.readRegister(INT_SOURCE);
 		acc1.readRegister(FF_MT_SRC);
 		acc1.readAccelData(accelCount);
 	}
 	
-	bool sendPacket(BleLongPacket * blePacket)
+	bool send_packet(BleLongPacket * blePacket)
 	{
 		//TODO: add to characteristic, send to BLE
+		return true;
 	}
 	
-	void readPressureTemp()
+
+	void read_press_temp()
 	{
 		cli();
 #ifdef RDV_DEBUG
@@ -345,10 +414,19 @@
 		BlePkt.pressure = 0;
 		BlePkt.temperature = 0;
 		sei();
-		clearAccInts();
+		clear_acc_ints();
 	}
 	
-	void enableInt(byte pcie)
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Enables the corresponding interrupt bank.
+//#
+//# Parameters:		Interrupt bank to enable.  Default is all interrupts enabled.
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////	
+	void enable_int(uint8_t pcie)
 	{
 		switch(pcie)
 		{
@@ -382,8 +460,17 @@
 			}
 		}
 	}
-	
-	void disableInt(byte pcie)
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Disables the corresponding interrupt bank.
+//#
+//# Parameters:		Interrupt bank to disable.  Default is all interrupts disabled.
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////	
+	void disable_int(uint8_t pcie)
 	{
 		switch(pcie)
 		{
@@ -417,13 +504,22 @@
 		}
 	}
 	
-	
-	long readVcc() 
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	Reads the internal bandgap to get an accurate battery power
+//#					level reading.
+//#
+//# Parameters:		None
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////	
+	long read_vcc() 
 	{
 		// Read 1.1V reference against AVcc
 		// set the reference to Vcc and the measurement to the internal 1.1V reference
 		cli();
-		byte ADC_state = ADMUX;
+		uint8_t ADC_state = ADMUX;
 	
 		ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
 		
@@ -444,7 +540,17 @@
 		return result; // Vcc in millivolts
 	}
 	
-	
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	ISR for the PCINT0 bus interrupt.  This is an external interrupt from 
+//#					the BLE MCU.  It only is utilized during factory mode.
+//#
+//# Parameters:		Interrupt vector
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////	
 	ISR(PCINT0_vect)
 	{
 		cli();
@@ -461,9 +567,21 @@
 				Serial.println("BLE pushed, no factory");
 #endif
 			}
+		}
 		sei();
 	}
-	
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	ISR for the PCINT1 bus interrupt.  This is an external interrupt from 
+//#					the accelerometer that is triggered by filtered motion or if the 
+//#					accelerometer is entering or exiting sleep mode.
+//#
+//# Parameters:		Interrupt vector
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////		
 	ISR(PCINT1_vect)
 	{
 		cli();
@@ -473,7 +591,17 @@
 		}
 		sei();
 	}
-	
+
+//#START_FUNCTION_HEADER//////////////////////////////////////////////////////
+//#	
+//# Description: 	ISR for the PCINT1 bus interrupt.  This is an external interrupt from 
+//#					the accelerometer that is triggered by the accelerometer data being ready.
+//#
+//# Parameters:		Interrupt vector
+//#
+//# Returns: 		Nothing
+//#
+//#//END_FUNCTION_HEADER////////////////////////////////////////////////////////		
 	ISR(PCINT2_vect)
 	{
 		cli();
